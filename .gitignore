@@ -1,0 +1,9 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+*.md
+/.vs
+/YG.Monitoring/bin/Debug/net8.0
+/YG.Monitoring/obj
+/YG.Monitoring/appsettings.json
