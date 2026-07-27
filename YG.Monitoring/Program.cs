@@ -6,6 +6,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using YG.ADO;
 using YG.LogProvider;
 using YG.Monitoring.BGWorker;
@@ -49,6 +50,22 @@ builder.Services.AddYGSendEmail(new SendMailOptions()
      Port = port,
      SecureSocketOption = sso
 });
+
+builder.Services.AddHttpClient("MonitoringHttpClient", client =>
+    {
+        // Let the resilience pipeline control request timeouts.
+        client.Timeout = Timeout.InfiniteTimeSpan;
+
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("YG.Monitoring/1.0");
+
+        client.DefaultRequestHeaders.CacheControl =
+            new System.Net.Http.Headers.CacheControlHeaderValue
+            {
+                NoCache = true,
+                NoStore = true
+            };
+    })
+    .AddStandardResilienceHandler();
 
 builder.Services.Configure<BGWorkerOptions>(config.GetSection("BGWorker"));
 builder.Services.AddHostedService<BGWorker>();

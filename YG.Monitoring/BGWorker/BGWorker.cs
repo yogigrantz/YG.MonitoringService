@@ -2,16 +2,19 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.VisualBasic.FileIO;
 using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using YG.ADO;
 using YG.Monitoring.DTOs;
 using YG.SendMail;
+using static Microsoft.IO.RecyclableMemoryStreamManager;
 
 namespace YG.Monitoring.BGWorker;
 
@@ -20,16 +23,18 @@ public class BGWorker : BackgroundService
     private readonly BGWorkerOptions _options;
     private readonly IConfiguration _config;
     private readonly ILogger<BGWorker> _logger;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly IDBSPToolFactory _dbFactory;
     private readonly ISendMail _email;
     private int _connTimeout = 30;
     private int _sqlCmdTimeout = 30;
 
-    public BGWorker(IOptions<BGWorkerOptions> options, IConfiguration config, ILogger<BGWorker> logger, IDBSPToolFactory dbFactory, ISendMail email)
+    public BGWorker(IOptions<BGWorkerOptions> options, IConfiguration config, ILogger<BGWorker> logger, IHttpClientFactory httpClientFactory, IDBSPToolFactory dbFactory, ISendMail email)
     {
         this._options = options.Value;
         this._config = config;
         this._logger = logger;
+        this._httpClientFactory = httpClientFactory;
         this._dbFactory = dbFactory;
         this._email = email;
         if (int.TryParse(_config["DBConnTimeout"], out int connTimeout))
@@ -39,17 +44,23 @@ public class BGWorker : BackgroundService
             _sqlCmdTimeout = sqlcmdTimeout;
 
     }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var monitorTasks = _options.MonitorActionOptions
-       .Select(action => RunMonitorLoopAsync(action, stoppingToken))
-       .ToArray();
+        IEnumerable<MonitorOption> monitorOptions = _options.SqlMonitorOptions
+                                    .Cast<MonitorOption>()
+                                    .Concat(_options.HttpMonitorOptions);
+
+        Task[] monitorTasks = monitorOptions
+                        .Select(option =>
+                            RunMonitorLoopAsync(option, stoppingToken))
+                        .ToArray();
 
         await Task.WhenAll(monitorTasks);
     }
 
     private async Task RunMonitorLoopAsync(
-    MonitorActionOption action,
+    MonitorOption action,
     CancellationToken stoppingToken)
     {
         if (action.RunIntervalInSeconds <= 0)
@@ -89,9 +100,60 @@ public class BGWorker : BackgroundService
         }
     }
 
-    private async Task RunMonitorAsync(
-    MonitorActionOption action,
-    CancellationToken cancellationToken)
+    private async Task RunMonitorAsync(MonitorOption option, CancellationToken stoppingToken)
+    {
+        switch (option)
+        {
+            case SqlMonitorOption sqlOption:
+                await RunSqlMonitorAsync(sqlOption, stoppingToken);
+                break;
+
+            case HttpMonitorOption httpOption:
+                await RunHttpMonitorAsync(httpOption, stoppingToken);
+                break;
+
+            default:
+                _logger.LogError("Monitor {MonitorName} has unsupported option type {OptionType}.", option.Name,option.GetType().Name);
+                break;
+        }
+    }
+
+    private async Task RunHttpMonitorAsync(HttpMonitorOption action, CancellationToken cancellationToken)
+    {
+        using HttpClient client = _httpClientFactory.CreateClient("MonitoringHttpClient");
+        string message = "";
+        try
+        {
+            using HttpResponseMessage response = await client.GetAsync(action.Url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+            if ((int)response.StatusCode != action.ExpectedStatusCode)
+            {
+
+                message = $"Monitor '{action.Name}' expected HTTP {action.ExpectedStatusCode}, but received {(int)response.StatusCode} {response.StatusCode}.";
+                _logger.LogError(message);
+
+                string result = await SendEmailAsync(action, message);
+
+                _logger.LogInformation("Http monitor {MonitorName} email result: {EmailResult}", action.Name, result);
+
+            }
+            else
+                _logger.LogInformation("HTTP monitor {MonitorName} succeeded with status {StatusCode}.", action.Name, response.StatusCode);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Let BackgroundService stop gracefully.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            string msg = $"Http monitor '{action.Name}' failed ({action.Url}). Please check log.\r\n{ex.StackTrace}";
+            string result = await SendEmailAsync(action, msg);
+            _logger.LogError(ex, msg);
+        }
+    }
+
+    private async Task RunSqlMonitorAsync(SqlMonitorOption action, CancellationToken cancellationToken)
     {
         try
         {
@@ -125,20 +187,9 @@ public class BGWorker : BackgroundService
                 Environment.NewLine,
                 message);
 
-            var email = new EmailDTO
-            {
-                To = action.EmailRecipients,
-                Subject = action.EmailSubject ?? "Alert from YG.Monitoring",
-                Body = message,
-                IsHtml = false
-            };
+            string result = await SendEmailAsync(action, message);
 
-            string result = await _email.SendAsync(email);
-
-            _logger.LogInformation(
-                "Database monitor {MonitorName} email result: {EmailResult}",
-                action.Name,
-                result);
+            _logger.LogInformation("Database monitor {MonitorName} email result: {EmailResult}", action.Name, result);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -147,11 +198,30 @@ public class BGWorker : BackgroundService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Database monitor '{MonitorName}' failed.", action.Name);
+            string msg = $"Database monitor '{action.Name}' failed. Please check log.\r\n{ex.StackTrace}";
+            string result = await SendEmailAsync(action, msg);
+            _logger.LogError(ex, msg);
         }
     }
 
-    private static string FormatTable(DataTable table, MonitorActionOption action)
+    private async Task<string> SendEmailAsync(MonitorOption action, string message)
+    {
+        var email = new EmailDTO
+        {
+            To = action.EmailRecipients,
+            Subject = action.EmailSubject ?? "Alert from YG.Monitoring",
+            Body = message,
+            IsHtml = false
+        };
+
+        if (!string.IsNullOrEmpty(_config["YGSendEmail:SenderEmail"]))
+            email.SenderEmail = _config["YGSendEmail:SenderEmail"];
+
+        string result = await _email.SendAsync(email);
+        return result;
+    }
+
+    private static string FormatTable(DataTable table, MonitorOption action)
     {
         var sb = new StringBuilder();
 

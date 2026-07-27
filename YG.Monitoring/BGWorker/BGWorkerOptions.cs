@@ -3,8 +3,9 @@ using YG.Monitoring.DTOs;
 
 namespace YG.Monitoring.BGWorker;
 
-public class BGWorkerOptions
+public sealed class BGWorkerOptions
 {
-    public int IntervalInSeconds { get; set; } = 60;
-    public List<MonitorActionOption> MonitorActionOptions { get; set; } = [];
+    public SqlMonitorOption[] SqlMonitorOptions { get; set; } = [];
+
+    public HttpMonitorOption[] HttpMonitorOptions { get; set; } = [];
 }
