@@ -16,3 +16,50 @@ When a query returns one or more records, the application logs the results and a
 * Built on .NET 8 Worker Service and dependency injection
 * Resilient database access using **YG.ADO**
 
+Sample appsettings.json:
+            {
+              "YGLogging": {
+                "folderName": "Log",
+                "maxSize": 50000,
+                "expiryDays": 3
+              },
+              "BGWorker": {
+                "SqlMonitorOptions": [
+                  {
+                    "Name": "Checking 0 sequencenbr",
+                    "RunIntervalInSeconds": 30,
+                    "ConnectionString": "yourconnectionstring",
+                    "SqlCommand": "yoursqlstatement",
+                    "EmailRecipients": [
+                      "yxgrantz@yukonhospitals.ca",
+                      "csharpxprt@gmail.com"
+                    ],
+                    "EmailSubject": "TableA Check for SequenceNbr = 0",
+                    "ResilienceNbrOfRetries": 5,
+                    "ResilienceWaitInMs": 1000
+                  }
+                ],
+                "HttpMonitorOptions": [
+                  {
+                    "Name": "Keep App Warm",
+                    "RunIntervalInSeconds": 300,
+                    "Url": "yourURL",
+                    "ExpectedStatusCode": 200,
+                    "EmailRecipients": [
+                      "yogitester1000@mailinator.com"
+                    ],
+                    "EmailSubject": "App Health Check Failed"
+                  }
+                ]
+              },
+              "YGSendEmail": {
+                "Host": "yourhost",
+                "Username": "yourUsername",
+                "Password": "yourpwd",
+                "Port": 465,
+                "SecureSocketOption": "Auto",
+                "SenderEmail": ""
+              },
+              "DBConnTimeout": 60,
+              "SQLCmdTimeout": 60
+            }
