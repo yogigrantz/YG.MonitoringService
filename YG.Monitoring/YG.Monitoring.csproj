@@ -11,7 +11,7 @@
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="8.10.0" />
     <PackageReference Include="YG.ADO" Version="2.0.0" />
-    <PackageReference Include="YG.LogProvider" Version="2.1.0" />
+    <PackageReference Include="YG.LogProvider" Version="2.2.2" />
     <PackageReference Include="YG.SendMail" Version="2.0.0" />
   </ItemGroup>
 

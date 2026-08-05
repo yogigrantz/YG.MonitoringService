@@ -19,11 +19,13 @@ builder.Logging.ClearProviders();
 builder.Logging.AddYGLogProvider(option =>
 {
     option.BaseDirectory = AppContext.BaseDirectory;
-    option.FolderName = config["YGLogging:folderName"]??"Log";
+    option.FolderName = config["YGLogging:folderName"] ?? "Log";
     option.MinimumLevel = LogLevel.Information;
-    if (int.TryParse(config["YGLogging:maxSize"].ToString(), out int maxFilesize))
-        option.MaxSize = maxFilesize;
-    if (int.TryParse(config["YGLogging:expiryDays"].ToString(), out int expiryDays))
+
+    if (long.TryParse(config["YGLogging:maxSize"], out long maxFileSize))
+        option.MaxSize = maxFileSize;
+
+    if (int.TryParse(config["YGLogging:expiryDays"], out int expiryDays))
         option.ExpiryDays = expiryDays;
 });
 
